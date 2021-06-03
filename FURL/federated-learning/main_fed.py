@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 # Python version: 3.6
 
+from models.resnet_simclr import ResNetSimCLR
+from data_aug.contrastive_learning_dataset import ContrastiveLearningDataset
 from models.test import test_img
 from models.Fed import FedAvg
 from models.Nets import MLP, CNNMnist, CNNCifar
@@ -23,33 +25,46 @@ if __name__ == '__main__':
     args.device = torch.device('cuda:{}'.format(
         args.gpu) if torch.cuda.is_available() and args.gpu != -1 else 'cpu')
 
+    dataset = ContrastiveLearningDataset(args.data)
+
+    dataset_train = dataset.get_dataset(args.dataset, args.n_views)
+
+    train_loader = torch.utils.data.DataLoader(
+        dataset_train, batch_size=args.batch_size, shuffle=True,
+        num_workers=args.workers, pin_memory=True, drop_last=True)
+
     # load dataset and split users
     if args.dataset == 'mnist':
-        trans_mnist = transforms.Compose(
-            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
-        dataset_train = datasets.MNIST(
-            '../data/mnist/', train=True, download=True, transform=trans_mnist)
-        dataset_test = datasets.MNIST(
-            '../data/mnist/', train=False, download=True, transform=trans_mnist)
+        # trans_mnist = transforms.Compose(
+        #     [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
+        # dataset_train = datasets.MNIST(
+        #     '../data/mnist/', train=True, download=True, transform=trans_mnist)
+        # dataset_test = datasets.MNIST(
+        #     '../data/mnist/', train=False, download=True, transform=trans_mnist)
+
         # sample users
         if args.iid:
             dict_users = mnist_iid(dataset_train, args.num_users)
         else:
             dict_users = mnist_noniid(dataset_train, args.num_users)
-    elif args.dataset == 'cifar':
-        trans_cifar = transforms.Compose(
-            [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        dataset_train = datasets.CIFAR10(
-            '../data/cifar', train=True, download=True, transform=trans_cifar)
-        dataset_test = datasets.CIFAR10(
-            '../data/cifar', train=False, download=True, transform=trans_cifar)
+    elif args.dataset == 'cifar10':
+        # trans_cifar = transforms.Compose(
+        #     [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        # dataset_train = datasets.CIFAR10(
+        #     '../data/cifar', train=True, download=True, transform=trans_cifar)
+        # dataset_test = datasets.CIFAR10(
+        #     '../data/cifar', train=False, download=True, transform=trans_cifar)
         if args.iid:
             dict_users = cifar_iid(dataset_train, args.num_users)
         else:
             exit('Error: only consider IID setting in CIFAR10')
     else:
         exit('Error: unrecognized dataset')
-    img_size = dataset_train[0][0].shape
+    img_size = len(dataset_train[0][0])
+
+    # train_loader = torch.utils.data.DataLoader(
+    #     dataset_train, batch_size=args.batch_size, shuffle=True,
+    #     num_workers=args.workers, pin_memory=True, drop_last=True)
 
     # build model
     if args.model == 'cnn' and args.dataset == 'cifar':
@@ -62,6 +77,8 @@ if __name__ == '__main__':
             len_in *= x
         net_glob = MLP(dim_in=len_in, dim_hidden=200,
                        dim_out=args.num_classes).to(args.device)
+    elif args.model == 'resnet':
+        net_glob = ResNetSimCLR(base_model=args.arch, out_dim=args.out_dim)
     else:
         exit('Error: unrecognized model')
     print(net_glob)
@@ -87,24 +104,24 @@ if __name__ == '__main__':
         loss_locals = []
         if not args.all_clients:
             w_locals = []
-        m = tmax(int(args.frac * args.num_users), 1)
+        m = max(int(args.frac * args.num_users), 1)
         idxs_users = np.random.choice(range(args.num_users), m, replace=False)
         for idx in idxs_users:
             local_model = LocalUpdate(
                 args=args, dataset=dataset_train, idxs=dict_users[idx])
-            w, dict, loss = local_model.train(
+            w, loss = local_model.train(
                 net=copy.deepcopy(net_glob).to(args.device))
             if args.all_clients:
                 w_locals[idx] = copy.deepcopy(w)
-                dict_locals[idx] = copy.deepcopy(dict)
+                # dict_locals[idx] = copy.deepcopy(dict)
             else:
                 w_locals.append(copy.deepcopy(w))
-                dict_locals.append(copy.deepcopy(dict))
+                # dict_locals.append(copy.deepcopy(dict))
             loss_locals.append(copy.deepcopy(loss))
         # update global weights
         w_glob = FedAvg(w_locals)
-        for d in dict_locals:
-            dict_glob.update(d)
+        # for d in dict_locals:
+        #     dict_glob.update(d)
 
         # copy weight to net_glob
         net_glob.load_state_dict(w_glob)
