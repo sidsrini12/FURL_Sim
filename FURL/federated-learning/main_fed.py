@@ -28,10 +28,11 @@ if __name__ == '__main__':
     dataset = ContrastiveLearningDataset(args.data)
 
     dataset_train = dataset.get_dataset(args.dataset, args.n_views)
+    dataset_test = dataset.get_test_dataset(args.dataset, args.n_views)
 
-    train_loader = torch.utils.data.DataLoader(
-        dataset_train, batch_size=args.batch_size, shuffle=True,
-        num_workers=args.workers, pin_memory=True, drop_last=True)
+    # train_loader = torch.utils.data.DataLoader(
+    #     dataset_train, batch_size=args.batch_size, shuffle=True,
+    #     num_workers=args.workers, pin_memory=True, drop_last=True)
 
     # load dataset and split users
     if args.dataset == 'mnist':
@@ -54,6 +55,7 @@ if __name__ == '__main__':
         #     '../data/cifar', train=True, download=True, transform=trans_cifar)
         # dataset_test = datasets.CIFAR10(
         #     '../data/cifar', train=False, download=True, transform=trans_cifar)
+        
         if args.iid:
             dict_users = cifar_iid(dataset_train, args.num_users)
         else:
@@ -140,6 +142,8 @@ if __name__ == '__main__':
 
     # testing
     net_glob.eval()
+    dataset_train = datasets.CIFAR10(args.data, train=True, download=True,
+                                     transform=transforms.ToTensor())
     acc_train, loss_train = test_img(net_glob, dataset_train, args)
     acc_test, loss_test = test_img(net_glob, dataset_test, args)
     print("Training accuracy: {:.2f}".format(acc_train))
