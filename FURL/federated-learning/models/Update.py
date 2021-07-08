@@ -15,10 +15,27 @@ from torch.cuda.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 # from utils import save_config_file, accuracy, save_checkpoint
 
 torch.manual_seed(0)
 
+
+def accuracy(output, target, topk=(1,)):
+    """Computes the accuracy over the k top predictions for the specified values of k"""
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
+
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+        res = []
+        for k in topk:
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
+            res.append(correct_k.mul_(100.0 / batch_size))
+        return res
 
 class DatasetSplit(Dataset):
     def __init__(self, dataset, idxs):
@@ -34,22 +51,24 @@ class DatasetSplit(Dataset):
 
 
 class LocalUpdate(object):
-    def __init__(self, args, dataset=None, idxs=None):
+    def __init__(self, args, index, dataset=None, idxs=None):
         self.args = args
         self.loss_func = nn.CrossEntropyLoss().to(self.args.device)
         self.selected_clients = []
         self.ldr_train = DataLoader(DatasetSplit(dataset, idxs), batch_size=self.args.local_bs, shuffle=True)
         self.writer = SummaryWriter()
+        self.index = index
 
     def train(self, net):
         net.train()
         # train and update
         optimizer = torch.optim.SGD(net.parameters(), lr=self.args.lr, momentum=self.args.momentum)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=len(self.ldr_train), eta_min=0,
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=len(self.ldr_train), eta_min=0,
                                                                last_epoch=-1)
 
         scaler = GradScaler(enabled=self.args.fp16_precision)
         epoch_loss = []
+        n_iter = 0
         for iter in range(self.args.local_ep):
             batch_loss = []
             for batch_idx, (images, labels) in enumerate(self.ldr_train):
@@ -62,13 +81,38 @@ class LocalUpdate(object):
                 loss = self.loss_func(logits, labels)
                 loss.backward()
                 optimizer.step()
-                if self.args.verbose and batch_idx % 10 == 0:
-                    print('Update Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                        iter, batch_idx * len(images), len(self.ldr_train.dataset),
-                               100. * batch_idx / len(self.ldr_train), loss.item()))
+                # if self.args.verbose and batch_idx % 10 == 0:
+                #     print('Update Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                #         iter, batch_idx * len(images), len(self.ldr_train.dataset),
+                #                100. * batch_idx / len(self.ldr_train), loss.item()))
+                # if n_iter % self.args.log_every_n_steps == 0:
+                #     top1, top5 = accuracy(logits, labels, topk=(1, 5))
+                #     self.writer.add_scalar('loss', loss, global_step=n_iter)
+                #     self.writer.add_scalar(
+                #         'acc/top1', top1[0], global_step=n_iter)
+                #     self.writer.add_scalar(
+                #         'acc/top5', top5[0], global_step=n_iter)
+                #     self.writer.add_scalar('learning_rate', self.scheduler.get_lr()[
+                #                            0], global_step=n_iter)
+
+                n_iter += 1
                 batch_loss.append(loss.item())
+
+            # warmup for the first 10 epochs
+            if iter >= 10:
+                self.scheduler.step()
+            
             epoch_loss.append(sum(batch_loss)/len(batch_loss))
-        return net.state_dict(), sum(epoch_loss) / len(epoch_loss)
+        
+        # plot loss curve
+        # plt.figure()
+        # plt.plot(range(len(epoch_loss)), epoch_loss)
+        # plt.ylabel('train_loss')
+        # plt.savefig('./save/client{}_{}_{}_{}_C{}_iid{}.png'.format(self.index, self.args.dataset,
+        #                                                     self.args.model, self.args.epochs, self.args.frac, self.args.iid))
+        top1, top5 = accuracy(logits, labels, topk=(1, 5))
+        print("Accuracy: Top1 {} Top5 {}".format(top1[0], top5[0]))
+        return net.state_dict(), sum(epoch_loss) / len(epoch_loss), epoch_loss
 
         
     # def __init__(self, *args, **kwargs):
