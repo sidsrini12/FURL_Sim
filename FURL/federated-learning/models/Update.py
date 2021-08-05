@@ -68,10 +68,12 @@ class LocalUpdate(object):
 
         scaler = GradScaler(enabled=self.args.fp16_precision)
         epoch_loss = []
-        n_iter = 0
+        # n_iter = 0
+        top1_accuracy = 0
+        top5_accuracy = 0
         for iter in range(self.args.local_ep):
             batch_loss = []
-            for batch_idx, (images, labels) in enumerate(self.ldr_train):
+            for batch_idx, (images, y_batch) in enumerate(self.ldr_train):
                 images = torch.cat(images, dim=0)
 
                 images = images.to(self.args.device)
@@ -81,10 +83,10 @@ class LocalUpdate(object):
                 loss = self.loss_func(logits, labels)
                 loss.backward()
                 optimizer.step()
-                # if self.args.verbose and batch_idx % 10 == 0:
-                #     print('Update Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                #         iter, batch_idx * len(images), len(self.ldr_train.dataset),
-                #                100. * batch_idx / len(self.ldr_train), loss.item()))
+                if self.args.verbose and batch_idx % 10 == 0:
+                    print('Update Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                        iter, batch_idx * len(images), len(self.ldr_train.dataset),
+                               100. * batch_idx / len(self.ldr_train), loss.item()))
                 # if n_iter % self.args.log_every_n_steps == 0:
                 #     top1, top5 = accuracy(logits, labels, topk=(1, 5))
                 #     self.writer.add_scalar('loss', loss, global_step=n_iter)
@@ -95,14 +97,20 @@ class LocalUpdate(object):
                 #     self.writer.add_scalar('learning_rate', self.scheduler.get_lr()[
                 #                            0], global_step=n_iter)
 
-                n_iter += 1
+                # n_iter += 1
+                top1, top5 = accuracy(logits, y_batch, topk=(1, 5))
+                top1_accuracy += top1[0]
+                top5_accuracy += top5[0]
                 batch_loss.append(loss.item())
 
             # warmup for the first 10 epochs
             if iter >= 10:
                 self.scheduler.step()
             
+            top1_accuracy /= (batch_idx + 1)
+            top5_accuracy /= (batch_idx + 1)
             epoch_loss.append(sum(batch_loss)/len(batch_loss))
+            print(f"Epoch {iter}\tTop1 Train accuracy {top1_accuracy.item()}\tTop5 train acc: {top5_accuracy.item()}")
         
         # plot loss curve
         # plt.figure()
@@ -110,8 +118,8 @@ class LocalUpdate(object):
         # plt.ylabel('train_loss')
         # plt.savefig('./save/client{}_{}_{}_{}_C{}_iid{}.png'.format(self.index, self.args.dataset,
         #                                                     self.args.model, self.args.epochs, self.args.frac, self.args.iid))
-        top1, top5 = accuracy(logits, labels, topk=(1, 5))
-        print("Accuracy: Top1 {} Top5 {}".format(top1[0], top5[0]))
+        # top1, top5 = accuracy(logits, labels, topk=(1, 5))
+        # print("Accuracy: Top1 {} Top5 {}".format(top1[0], top5[0]))
         return net.state_dict(), sum(epoch_loss) / len(epoch_loss), epoch_loss
 
         

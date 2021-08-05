@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # Python version: 3.6
 
+from torch.utils.data import DataLoader, Dataset
 from models.resnet_simclr import ResNetSimCLR
 from data_aug.contrastive_learning_dataset import ContrastiveLearningDataset
 from models.test import test_img
@@ -22,6 +23,22 @@ matplotlib.use('Agg')
 # PLOT FOR DIFFERENT ITERATIONS AT EACH CLIENT
 
 
+def accuracy(output, target, topk=(1,)):
+    """Computes the accuracy over the k top predictions for the specified values of k"""
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
+
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+        res = []
+        for k in topk:
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
+            res.append(correct_k.mul_(100.0 / batch_size))
+        return res
+
 if __name__ == '__main__':
     # parse args
     args = args_parser()
@@ -32,6 +49,9 @@ if __name__ == '__main__':
 
     dataset_train = dataset.get_dataset(args.dataset, args.n_views)
     dataset_test = dataset.get_test_dataset(args.dataset, args.n_views)
+    dataset_loss = datasets.CIFAR10(args.data, train=True, download=True,
+                                     transform=transforms.ToTensor())
+    criterion = torch.nn.CrossEntropyLoss().to(args.device)
 
     # train_loader = torch.utils.data.DataLoader(
     #     dataset_train, batch_size=args.batch_size, shuffle=True,
@@ -83,7 +103,8 @@ if __name__ == '__main__':
         net_glob = MLP(dim_in=len_in, dim_hidden=200,
                        dim_out=args.num_classes).to(args.device)
     elif args.model == 'resnet':
-        net_glob = ResNetSimCLR(base_model=args.arch, out_dim=args.out_dim)
+        net_glob = ResNetSimCLR(base_model=args.arch,
+                                out_dim=args.out_dim).to(args.device)
     else:
         exit('Error: unrecognized model')
     
@@ -135,8 +156,25 @@ if __name__ == '__main__':
 
         # print loss
         # MAKE WEIGHTED AVERAGE
-        loss_avg = sum(loss_locals) / len(loss_locals)
-        print('Round {:3d}, Average loss {:.3f}'.format(iter, loss_avg))
+        train_loader = DataLoader(dataset_loss, batch_size=1000,
+                                  num_workers=0, drop_last=False, shuffle=True)
+        running_loss = 0
+        for counter, (x_batch, y_batch) in enumerate(train_loader):
+            x_batch = x_batch.to(args.device)
+            y_batch = y_batch.to(args.device)
+
+            logits = net_glob(x_batch)
+            loss = criterion(logits, y_batch)
+            running_loss += loss
+            top1, top5 = accuracy(logits, y_batch, topk=(1, 5))
+            top1_accuracy += top1[0]
+            top5_accuracy += top5[0]
+
+        top1_accuracy /= (counter + 1)
+        top5_accuracy /= (counter + 1)
+        # loss_avg = sum(loss_locals) / len(loss_locals)
+        loss_avg = running_loss / (counter + 1)
+        print('Round {:3d}, Average loss {:.3f}, Top1 {:.3f}, Top5 {:.3f}'.format(iter, loss_avg, top1_accuracy, top5_accuracy))
         for i in range(args.local_ep):
             loss_train.append(loss_avg)
 
