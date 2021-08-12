@@ -13,8 +13,8 @@ def args_parser():
     parser = argparse.ArgumentParser()
     # federated arguments
     parser.add_argument('--epochs', type=int, default=10, help="rounds of training")
-    parser.add_argument('--num_users', type=int, default=5, help="number of users: K")
-    parser.add_argument('--frac', type=float, default=0.1, help="the fraction of clients: C")
+    parser.add_argument('--num_users', type=int, default=100, help="number of users: K")
+    parser.add_argument('--frac', type=float, default=1, help="the fraction of clients: C")
     parser.add_argument('--local_ep', type=int, default=5, help="the number of local epochs: E")
     parser.add_argument('--local_bs', type=int, default=10, help="local batch size: B")
     parser.add_argument('--bs', type=int, default=128, help="test batch size")
@@ -46,7 +46,7 @@ def args_parser():
     # Contrastive
     parser.add_argument('--out_dim', default=128, type=int,
                         help='feature dimension (default: 128)')
-    parser.add_argument('--log-every-n-steps', default=100, type=int,
+    parser.add_argument('--log-every-n-steps', default=1, type=int,
                         help='Log every n steps')
     parser.add_argument('--temperature', default=0.07, type=float,
                         help='softmax temperature (default: 0.07)')
